@@ -1,0 +1,13 @@
+{
+  "name": "publicaciones-app",
+  "version": "1.0.0",
+  "description": "Centro de publicaciones multi-negocio para Facebook e Instagram (FixIt Express). Sin dependencias externas: solo Node.js 22+.",
+  "main": "src/server.js",
+  "private": true,
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

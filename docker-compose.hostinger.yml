@@ -1,0 +1,38 @@
+# Proyecto para el Administrador de Docker de Hostinger.
+# Usa el Traefik que ya viene en el proyecto "n8n" (certificados HTTPS automáticos)
+# y se conecta a la red interna de n8n para llamar al workflow motor sin salir a internet.
+services:
+  publicaciones:
+    image: ghcr.io/USUARIO_GITHUB/publicaciones-app:latest
+    restart: always
+    environment:
+      APP_NAME: "Centro de Publicaciones"
+      APP_URL: "https://publicaciones.avantenayarit.com.mx"
+      APP_TIMEZONE: "America/Mazatlan"
+      APP_ENCRYPTION_KEY: "CAMBIAR"
+      N8N_WEBHOOK_URL: "http://n8n:5678/webhook/motor-publicacion"
+      N8N_WEBHOOK_SECRET: "CAMBIAR"
+      CLOUDINARY_CLOUD_NAME: "CAMBIAR"
+      CLOUDINARY_API_KEY: "CAMBIAR"
+      CLOUDINARY_API_SECRET: "CAMBIAR"
+      ADMIN_EMAIL: "CAMBIAR"
+      ADMIN_PASSWORD: "CAMBIAR"
+    volumes:
+      - publicaciones_datos:/data
+    networks:
+      - n8n_default
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=n8n_default
+      - traefik.http.routers.publicaciones.rule=Host(`publicaciones.avantenayarit.com.mx`)
+      - traefik.http.routers.publicaciones.entrypoints=web,websecure
+      - traefik.http.routers.publicaciones.tls=true
+      - traefik.http.routers.publicaciones.tls.certresolver=mytlschallenge
+      - traefik.http.services.publicaciones.loadbalancer.server.port=3000
+
+volumes:
+  publicaciones_datos:
+
+networks:
+  n8n_default:
+    external: true

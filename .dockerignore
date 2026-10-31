@@ -1,0 +1,9 @@
+.git
+.github
+node_modules
+datos
+*.db
+*.db-*
+.env
+README.md
+docker-compose*.yml
