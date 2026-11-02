@@ -2,7 +2,35 @@
 // Cola de publicación: toma publicaciones "en_cola" y se las entrega al
 // workflow motor de n8n por la red interna de Docker. n8n responde cuando
 // termina (Respond to Webhook al final), o con error si algo falla.
+const http = require('node:http');
+const https = require('node:https');
 const { config } = require('./config');
+
+// Se usa http.request (y no fetch) porque fetch corta a los 5 minutos de espera,
+// y un video puede tardar más en procesarse en Instagram.
+function postLargo(url, cuerpo, cabeceras, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const datos = Buffer.from(cuerpo);
+    const req = (u.protocol === 'https:' ? https : http).request(u, {
+      method: 'POST',
+      headers: { ...cabeceras, 'Content-Length': datos.length },
+    }, (res) => {
+      const partes = [];
+      res.on('data', (c) => partes.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, texto: Buffer.concat(partes).toString('utf8') }));
+      res.on('error', reject);
+    });
+    const limite = setTimeout(() => {
+      const e = new Error('timeout');
+      e.name = 'TimeoutError';
+      req.destroy(e);
+    }, timeoutMs);
+    req.on('error', (e) => { clearTimeout(limite); reject(e); });
+    req.on('close', () => clearTimeout(limite));
+    req.end(datos);
+  });
+}
 const db = require('./db');
 const { descifrar } = require('./seguridad');
 const { registrar } = require('./auditoria');
@@ -40,10 +68,7 @@ async function procesar(p) {
     if (!pagina || !pagina.activo) throw new Error('La página está desactivada.');
     if (!negocio.meta_token_cifrado) throw new Error('El negocio no tiene configurado el token de Meta.');
 
-    const resp = await fetch(config.n8n.url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Publicador-Secret': config.n8n.secreto },
-      body: JSON.stringify({
+    const resp = await postLargo(config.n8n.url, JSON.stringify({
         publicacion_id: p.id,
         negocio: negocio.nombre,
         pagina: pagina.nombre,
@@ -54,10 +79,20 @@ async function procesar(p) {
         texto: p.texto,
         token: descifrar(negocio.meta_token_cifrado),
       }),
-      signal: AbortSignal.timeout(config.n8n.timeoutMin * 60e3),
-    });
-    const cuerpo = await resp.text();
-    if (!resp.ok) throw new Error(`n8n respondió ${resp.status}: ${cuerpo.slice(0, 500) || 'sin detalle'}`);
+      { 'Content-Type': 'application/json', 'X-Publicador-Secret': config.n8n.secreto },
+      config.n8n.timeoutMin * 60e3,
+    );
+    const cuerpo = resp.texto;
+    if (resp.status < 200 || resp.status >= 300) {
+      let detalle = cuerpo.slice(0, 500) || 'sin detalle';
+      try {
+        const j = JSON.parse(cuerpo);
+        if (j.message) detalle = j.message;
+      } catch { /* no es JSON */ }
+      if (resp.status === 404) detalle = 'No existe el webhook "motor-publicacion" o el workflow no está activo en n8n.';
+      if (resp.status === 403 || resp.status === 401) detalle = 'n8n rechazó el secreto. Revisa que N8N_WEBHOOK_SECRET coincida con la credencial del webhook.';
+      throw new Error(`n8n respondió ${resp.status}: ${detalle}`);
+    }
 
     db.run(
       `UPDATE publicaciones SET estado = 'publicada', publicado_en = datetime('now'), resultado = ?
@@ -71,9 +106,9 @@ async function procesar(p) {
     let msg = e.message;
     if (e.name === 'TimeoutError') {
       msg = `n8n no respondió en ${config.n8n.timeoutMin} minutos. Revisa la ejecución en n8n y en las páginas antes de reintentar.`;
-    } else if (e.cause && e.cause.code === 'ECONNREFUSED') {
+    } else if (e.code === 'ECONNREFUSED') {
       msg = 'No se pudo conectar con n8n (¿está encendido y en la misma red?).';
-    } else if (e.cause && e.cause.code === 'ENOTFOUND') {
+    } else if (e.code === 'ENOTFOUND' || e.code === 'EAI_AGAIN') {
       msg = 'No se encontró el servidor de n8n. Revisa N8N_WEBHOOK_URL y la red de Docker.';
     }
     db.run("UPDATE publicaciones SET estado = 'error', detalle_error = ? WHERE id = ?", msg, p.id);
