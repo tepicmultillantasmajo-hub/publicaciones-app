@@ -65,6 +65,22 @@ function registrarRutas(r) {
     redirigir(ctx.res, `/negocios/${negocio.id}/paginas`);
   });
 
+  r.post('/negocios/:nid/paginas/:pid/eliminar', (ctx) => {
+    if (!requiereSesion(ctx)) return;
+    const negocio = negocioDeRuta(ctx, ['admin']);
+    const p = db.get('SELECT * FROM paginas WHERE id = ? AND negocio_id = ?', entero(ctx.params.pid), negocio.id);
+    if (!p) throw noEncontrado();
+    const usadas = db.get('SELECT COUNT(*) AS n FROM publicaciones WHERE pagina_id = ?', p.id).n;
+    if (usadas) {
+      seg.flash(ctx, 'error', `"${p.nombre}" ya tiene ${usadas} publicación(es) en su historial; no se puede eliminar. Desactívala para que nadie publique en ella.`);
+      return redirigir(ctx.res, `/negocios/${negocio.id}/paginas/${p.id}`);
+    }
+    db.run('DELETE FROM paginas WHERE id = ?', p.id);
+    registrar(ctx, 'pagina_eliminada', { negocioId: negocio.id, detalle: { nombre: p.nombre } });
+    seg.flash(ctx, 'exito', `Página "${p.nombre}" eliminada.`);
+    redirigir(ctx.res, `/negocios/${negocio.id}/paginas`);
+  });
+
   r.post('/negocios/:nid/paginas/:pid/verificar', async (ctx) => {
     if (!requiereSesion(ctx)) return;
     const negocio = negocioDeRuta(ctx, ['admin', 'dueno']);
@@ -93,11 +109,11 @@ function vistaPaginas(ctx, negocio, { error = null, valores = {} } = {}) {
 <div class="encabezado"><h1>Páginas</h1><p class="sutil">Cada página publica en su Facebook y en su Instagram vinculado (muro e historias).</p></div>
 ${paginas.length ? html`
 <div class="tabla-envoltura"><table class="tabla">
-  <thead><tr><th>Página</th><th>ID Facebook</th><th>ID Instagram</th><th>Con acceso</th><th>Publicadas</th><th></th></tr></thead>
+  <thead><tr><th>Página</th>${esAdmin ? html`<th>ID Facebook</th><th>ID Instagram</th>` : ''}<th>Con acceso</th><th>Publicadas</th><th></th></tr></thead>
   <tbody>${paginas.map((p) => html`
     <tr class="${p.activo ? '' : 'inactivo'}">
       <td><strong>${p.nombre}</strong>${p.activo ? '' : html` <span class="insignia gris">Desactivada</span>`}</td>
-      <td><code>${p.fb_page_id}</code></td><td><code>${p.ig_user_id}</code></td>
+      ${esAdmin ? html`<td><code>${p.fb_page_id}</code></td><td><code>${p.ig_user_id}</code></td>` : ''}
       <td>${p.proveedores} proveedor(es)</td><td>${p.publicadas}</td>
       <td class="derecha acciones-fila">
         <form method="post" action="/negocios/${negocio.id}/paginas/${p.id}/verificar" class="en-linea" data-ocupado="Verificando…">
@@ -138,6 +154,13 @@ function vistaEditar(ctx, negocio, p, error = null) {
     <label class="casilla"><input type="checkbox" name="activo" value="1" ${p.activo ? 'checked' : ''}>
       Página activa <small>Si la desactivas, nadie podrá publicar en ella.</small></label>
     <button type="submit" class="boton primario">Guardar</button>
+  </form>
+</section>
+<section class="tarjeta angosta zona-peligro">
+  <h2>Eliminar página</h2>
+  <p class="sutil">Solo se puede eliminar si nunca se ha publicado en ella desde la app. Si ya tiene historial, desactívala.</p>
+  <form method="post" action="/negocios/${negocio.id}/paginas/${p.id}/eliminar" data-confirmar="¿Eliminar la página ${p.nombre}?">
+    ${csrfInput(ctx)}<button type="submit" class="boton peligro">Eliminar página</button>
   </form>
 </section>`,
   });

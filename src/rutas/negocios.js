@@ -1,4 +1,5 @@
 'use strict';
+const fs = require('node:fs');
 const db = require('../db');
 const { html, fecha } = require('../plantilla');
 const { pagina, csrfInput } = require('../layout');
@@ -126,6 +127,37 @@ function registrarRutas(r) {
     seg.flash(ctx, 'exito', 'Token guardado y cifrado. Verifica cada página desde la sección Páginas.');
     redirigir(ctx.res, `/negocios/${negocio.id}/ajustes`);
   });
+
+  r.post('/negocios/:nid/eliminar', (ctx) => {
+    if (!requiereSesion(ctx)) return;
+    const negocio = negocioDeRuta(ctx, ['admin']);
+    if (texto(ctx.form.confirmar, 120) !== negocio.nombre) {
+      return enviar(ctx.res, 400, vistaAjustes(ctx, negocio, `Para eliminar, escribe el nombre exacto del negocio: ${negocio.nombre}`));
+    }
+    const activas = db.get(
+      "SELECT COUNT(*) AS n FROM publicaciones WHERE negocio_id = ? AND estado IN ('en_cola','publicando')", negocio.id).n;
+    if (activas) {
+      return enviar(ctx.res, 400, vistaAjustes(ctx, negocio,
+        'Este negocio tiene publicaciones en proceso. Espera a que terminen y vuelve a intentarlo.'));
+    }
+    const conteo = conteoNegocio(negocio.id);
+    const archivos = db.all('SELECT ruta FROM subidas WHERE negocio_id = ?', negocio.id);
+    db.transaccion(() => {
+      // Las sesiones, usuarios, páginas, asignaciones y publicaciones se borran en cascada.
+      db.run('DELETE FROM negocios WHERE id = ?', negocio.id);
+    });
+    for (const a of archivos) fs.rm(a.ruta, { force: true }, () => {});
+    registrar(ctx, 'negocio_eliminado', { negocioId: null, detalle: { nombre: negocio.nombre, ...conteo } });
+    seg.flash(ctx, 'exito', `Negocio "${negocio.nombre}" eliminado.`);
+    redirigir(ctx.res, '/negocios');
+  });
+}
+
+function conteoNegocio(id) {
+  return db.get(`SELECT
+    (SELECT COUNT(*) FROM paginas WHERE negocio_id = ?) AS paginas,
+    (SELECT COUNT(*) FROM usuarios WHERE negocio_id = ?) AS usuarios,
+    (SELECT COUNT(*) FROM publicaciones WHERE negocio_id = ?) AS publicaciones`, id, id, id);
 }
 
 function vistaNegocios(ctx, { error = null, valores = {} } = {}) {
@@ -205,7 +237,22 @@ ${error ? html`<div class="aviso error" role="alert">${error}</div>` : ''}
       <button type="submit" class="boton peligro chico">Quitar token</button>
     </form>` : ''}
   </section>
-</div>`,
+</div>
+${(() => {
+  const c = conteoNegocio(negocio.id);
+  return html`
+<section class="tarjeta zona-peligro">
+  <h2>Eliminar negocio</h2>
+  <p>Se borrarán <strong>definitivamente</strong> de la app: ${c.paginas} página(s), ${c.usuarios} usuario(s) y ${c.publicaciones} publicación(es) con su historial. No se puede deshacer.</p>
+  <p class="sutil">Lo que ya se publicó en Facebook e Instagram <strong>no</strong> se borra de las redes. Si solo quieres pausarlo, mejor desmarca "Negocio activo".</p>
+  <form method="post" action="/negocios/${negocio.id}/eliminar" class="formulario" data-confirmar="¿Eliminar definitivamente el negocio ${negocio.nombre}?">
+    ${csrfInput(ctx)}
+    <label>Para confirmar, escribe el nombre exacto: <code>${negocio.nombre}</code>
+      <input name="confirmar" autocomplete="off" required></label>
+    <button type="submit" class="boton peligro">Eliminar negocio</button>
+  </form>
+</section>`;
+})()}`,
   });
 }
 
