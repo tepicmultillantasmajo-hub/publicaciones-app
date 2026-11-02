@@ -7,7 +7,7 @@ const { config } = require('../config');
 const { ROLES } = require('../plantilla');
 const seg = require('../seguridad');
 const { registrar } = require('../auditoria');
-const { requiereSesion, texto } = require('../acceso');
+const { requiereSesion, texto, emailValido } = require('../acceso');
 
 function vistaLogin(ctx, { error = null, email = '' } = {}) {
   return pagina(ctx, {
@@ -91,6 +91,23 @@ function registrarRutas(r) {
     enviar(ctx.res, 200, vistaCuenta(ctx));
   });
 
+  r.post('/cuenta/datos', (ctx) => {
+    if (!requiereSesion(ctx)) return;
+    const u = ctx.usuario;
+    const nombre = texto(ctx.form.nombre, 120);
+    const email = texto(ctx.form.email, 200).toLowerCase();
+    let error = null;
+    if (!nombre) error = 'El nombre no puede quedar vacío.';
+    else if (!emailValido(email)) error = 'El correo no es válido.';
+    else if (email !== u.email && db.get('SELECT 1 AS x FROM usuarios WHERE email = ?', email)) error = `Ya existe un usuario con el correo ${email}.`;
+    else if (!seg.verificarPassword(String(ctx.form.password || ''), u.password_hash)) error = 'Para cambiar tus datos escribe tu contraseña actual.';
+    if (error) return enviar(ctx.res, 400, vistaCuenta(ctx, null, error));
+    db.run('UPDATE usuarios SET nombre = ?, email = ? WHERE id = ?', nombre, email, u.id);
+    registrar(ctx, 'usuario_actualizado', { detalle: { usuario: u.id, nombre, email } });
+    seg.flash(ctx, 'exito', 'Datos actualizados. Desde ahora entra con este correo.');
+    redirigir(ctx.res, '/cuenta');
+  });
+
   r.post('/cuenta', (ctx) => {
     if (!requiereSesion(ctx)) return;
     const u = ctx.usuario;
@@ -112,7 +129,7 @@ function registrarRutas(r) {
   });
 }
 
-function vistaCuenta(ctx, error = null) {
+function vistaCuenta(ctx, error = null, errorDatos = null) {
   const u = ctx.usuario;
   return pagina(ctx, {
     titulo: 'Mi cuenta',
@@ -121,13 +138,20 @@ function vistaCuenta(ctx, error = null) {
 ${u.debe_cambiar_password ? html`<div class="aviso info">Por seguridad, cambia la contraseña temporal que te dieron antes de continuar.</div>` : ''}
 <div class="rejilla dos">
   <section class="tarjeta">
-    <h2>Datos</h2>
+    <h2>Mis datos</h2>
     <dl class="datos">
-      <dt>Nombre</dt><dd>${u.nombre}</dd>
-      <dt>Correo</dt><dd>${u.email}</dd>
       <dt>Rol</dt><dd>${ROLES[u.rol]}</dd>
       ${u.negocio_nombre ? html`<dt>Negocio</dt><dd>${u.negocio_nombre}</dd>` : ''}
     </dl>
+    ${errorDatos ? html`<div class="aviso error" role="alert">${errorDatos}</div>` : ''}
+    <form method="post" action="/cuenta/datos" class="formulario">
+      ${csrfInput(ctx)}
+      <label>Nombre<input name="nombre" value="${u.nombre}" maxlength="120" required></label>
+      <label>Correo (con el que entras)<input type="email" name="email" value="${u.email}" maxlength="200" required></label>
+      <label>Contraseña actual<input type="password" name="password" autocomplete="current-password" required>
+        <small>Por seguridad, confirma tu contraseña para guardar cambios.</small></label>
+      <button type="submit" class="boton">Guardar datos</button>
+    </form>
   </section>
   <section class="tarjeta">
     <h2>Cambiar contraseña</h2>
