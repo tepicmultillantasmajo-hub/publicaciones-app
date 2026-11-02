@@ -20,6 +20,8 @@ const ACCIONES = {
   password_restablecida: 'Restableció la contraseña de un usuario',
   negocio_creado: 'Creó el negocio',
   negocio_actualizado: 'Actualizó el negocio',
+  negocio_eliminado: 'Eliminó un negocio',
+  pagina_eliminada: 'Eliminó una página',
   token_actualizado: 'Actualizó el token de Meta',
   pagina_creada: 'Agregó una página',
   pagina_actualizada: 'Actualizó una página',
