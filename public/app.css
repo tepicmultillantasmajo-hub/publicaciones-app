@@ -223,3 +223,5 @@ legend { font-weight: 700; margin-bottom: .55rem; padding: 0; }
 .rechazo summary { cursor: pointer; color: var(--rojo); font-weight: 600; margin-bottom: .6rem; }
 .credenciales .datos { margin-top: 1rem; }
 .error-pagina h1 { display: block; }
+.zona-peligro { border-color: color-mix(in srgb, var(--rojo) 35%, var(--borde)); margin-top: 1.25rem; }
+.zona-peligro h2 { color: var(--rojo); }
